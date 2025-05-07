@@ -1,59 +1,82 @@
-// parallel_graph_traversal.cpp
-// Assignment: Parallel BFS and DFS using OpenMP
-// Course: High Performance Computing
-// Author: [Your Name]
-// Date: [Date]
-
-// Required headers
 #include <iostream>
 #include <vector>
 #include <queue>
+#include <stack>
 #include <omp.h>
+#include <chrono>
+#include <cstring>
 
 using namespace std;
+using namespace chrono;
 
-// ----------------------
-// Function: parallelBFS
-// ----------------------
-// Performs parallel Breadth-First Search using OpenMP
-void parallelBFS(const vector<vector<int>>& adj, int start) {
-    int n = adj.size();
-    vector<bool> visited(n, false);
+const int N = 50000; // Adjust graph size as needed
+
+vector<int> adj[N]; // Adjacency list
+bool visited[N];
+
+// Utility to add an undirected edge
+void addEdge(int u, int v) {
+    adj[u].push_back(v);
+    adj[v].push_back(u);
+}
+
+void generateRandomGraph(int V, int edges_per_node) {
+    srand(time(0));
+    for (int u = 0; u < V; u++) {
+        for (int j = 0; j < edges_per_node; j++) {
+            int v = rand() % V;
+            if (v != u) {
+                addEdge(u, v);
+            }
+        }
+    }
+}
+
+// ---------------------- SERIAL BFS -----------------------
+void serialBFS(int start) {
+    memset(visited, false, sizeof(visited));
     queue<int> q;
-
-    visited[start] = true;
     q.push(start);
+    visited[start] = true;
 
-    cout << "Parallel BFS Traversal:\n";
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        for (int v : adj[u]) {
+            if (!visited[v]) {
+                visited[v] = true;
+                q.push(v);
+            }
+        }
+    }
+}
+
+// ---------------------- PARALLEL BFS -----------------------
+void parallelBFS(int start) {
+    memset(visited, false, sizeof(visited));
+    queue<int> q;
+    q.push(start);
+    visited[start] = true;
 
     while (!q.empty()) {
         int size = q.size();
 
         #pragma omp parallel for
-        for (int i = 0; i < size; ++i) {
-            int node;
-
-            // Critical section to pop from queue
+        for (int i = 0; i < size; i++) {
+            int u;
             #pragma omp critical
             {
-                if (!q.empty()) {
-                    node = q.front();
-                    q.pop();
-                    cout << "Visited: " << node << "\n";
-                }
+                u = q.front();
+                q.pop();
             }
 
-            // Traverse neighbors
-            #pragma omp parallel for
-            for (int j = 0; j < adj[node].size(); ++j) {
-                int neighbor = adj[node][j];
-
-                // Critical section to mark and enqueue unvisited nodes
-                #pragma omp critical
-                {
-                    if (!visited[neighbor]) {
-                        visited[neighbor] = true;
-                        q.push(neighbor);
+            for (int v : adj[u]) {
+                if (!visited[v]) {
+                    #pragma omp critical
+                    {
+                        if (!visited[v]) {
+                            visited[v] = true;
+                            q.push(v);
+                        }
                     }
                 }
             }
@@ -61,70 +84,74 @@ void parallelBFS(const vector<vector<int>>& adj, int start) {
     }
 }
 
-// ----------------------
-// Helper: parallelDFSUtil
-// ----------------------
-// Recursive utility for parallel DFS using OpenMP tasks
-void parallelDFSUtil(const vector<vector<int>>& adj, int node, vector<bool>& visited) {
-    // Critical section to avoid race conditions on visited[]
-    #pragma omp critical
-    {
-        if (visited[node]) return;
-        visited[node] = true;
-        cout << "Visited: " << node << "\n";
+// ---------------------- SERIAL DFS -----------------------
+void serialDFS(int u) {
+    visited[u] = true;
+    for (int v : adj[u]) {
+        if (!visited[v])
+            serialDFS(v);
     }
+}
 
-    // Launch parallel tasks for unvisited neighbors
-    for (int neighbor : adj[node]) {
-        #pragma omp task firstprivate(neighbor)
-        {
-            if (!visited[neighbor]) {
-                parallelDFSUtil(adj, neighbor, visited);
+// ---------------------- PARALLEL DFS -----------------------
+void parallelDFS(int start) {
+    memset(visited, false, sizeof(visited));
+    stack<int> s;
+    s.push(start);
+
+    while (!s.empty()) {
+        int u = s.top(); s.pop();
+        if (!visited[u]) {
+            visited[u] = true;
+
+            #pragma omp parallel for
+            for (int i = 0; i < adj[u].size(); i++) {
+                int v = adj[u][i];
+                if (!visited[v]) {
+                    #pragma omp critical
+                    s.push(v);
+                }
             }
         }
     }
-
-    #pragma omp taskwait
 }
 
-// ----------------------
-// Function: parallelDFS
-// ----------------------
-// Performs parallel Depth-First Search using OpenMP
-void parallelDFS(const vector<vector<int>>& adj, int start) {
-    int n = adj.size();
-    vector<bool> visited(n, false);
-
-    cout << "Parallel DFS Traversal:\n";
-
-    #pragma omp parallel
-    {
-        #pragma omp single
-        parallelDFSUtil(adj, start, visited);
-    }
-}
-
-// ----------------------
-// Function: main
-// ----------------------
-// Entry point: defines a graph and runs both traversals
+// ---------------------- DRIVER CODE -----------------------
 int main() {
-    // Define an undirected graph as adjacency list
-    int n = 6; // number of nodes
-    vector<vector<int>> adj(n);
+    int V = 50000;
+    generateRandomGraph(V, 20);
+    vector<vector<int>> adj(V); // dynamic allocation
+    for (int i = 0; i < V - 1; i++) {
+        addEdge(i, i + 1);
+    }
 
-    // Edges
-    adj[0] = {1, 2};
-    adj[1] = {0, 3, 4};
-    adj[2] = {0, 4};
-    adj[3] = {1, 5};
-    adj[4] = {1, 2};
-    adj[5] = {3};
+    cout << "Running Serial BFS..." << endl;
+    auto start = high_resolution_clock::now();
+    serialBFS(0);
+    auto stop = high_resolution_clock::now();
+    cout << "Serial BFS Time: " << duration_cast<microseconds>(stop - start).count() << " µs\n";
 
-    // Perform traversals
-    parallelBFS(adj, 0);
-    cout << "\n";
-    parallelDFS(adj, 0);
+    cout << "Running Parallel BFS..." << endl;
+    start = high_resolution_clock::now();
+    parallelBFS(0);
+    stop = high_resolution_clock::now();
+    cout << "Parallel BFS Time: " << duration_cast<microseconds>(stop - start).count() << " µs\n";
 
+    cout << "Running Serial DFS..." << endl;
+    memset(visited, false, sizeof(visited));
+    start = high_resolution_clock::now();
+    serialDFS(0);
+    stop = high_resolution_clock::now();
+    cout << "Serial DFS Time: " << duration_cast<microseconds>(stop - start).count() << " µs\n";
+
+    cout << "Running Parallel DFS..." << endl;
+    memset(visited, false, sizeof(visited));
+    start = high_resolution_clock::now();
+    parallelDFS(0);
+    stop = high_resolution_clock::now();
+    cout << "Parallel DFS Time: " << duration_cast<microseconds>(stop - start).count() << " µs\n";
     return 0;
 }
+
+// compile with: g++ -fopenmp parallel_graph_traversal.cpp -o parallel_graph_traversal
+// run with: ./parallel_graph_traversal
