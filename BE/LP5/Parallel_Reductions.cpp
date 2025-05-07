@@ -1,79 +1,148 @@
 #include <iostream>
 #include <vector>
-#include <climits>
 #include <cstdlib>
+#include <ctime>
+#include <chrono>
 #include <omp.h>
-#include <numeric>
+#include <iomanip>
 
-using namepspace std;
+using namespace std;
+using namespace chrono;
 
-// Serial Reduction Operations:
+// -------------------- Generate Random Array --------------------
+void generateArray(vector<int>& arr, int n) {
+    srand(time(0));
+    arr.clear();
+    for (int i = 0; i < n; ++i)
+        arr.push_back(rand() % 100000);
+}
 
-void SerialOps(const vector<int>& arr, int& minVal, int& maxVal, long long& sum, double& avg){
-    minVal = INT_MAX;
-    maxVal = INT_MIN;
-    sum = 0;
-    for(int val : arr){
-        if (val<minVal) minVal = val;
-        if (val>maxVal) maxVal = val;
+// -------------------- Sequential Operations --------------------
+int serialSum(const vector<int>& arr) {
+    int sum = 0;
+    for (int val : arr)
         sum += val;
-    }
-    avg = static_cast<double>(sum)/arr.size();
+    return sum;
 }
 
-// Parallel Reduction Operations
-
-void ParallelOps(const vector<int>& arr, int& minVal, int&maxVal, long long& sum, double& avg){
-    minVal = INT_MAX;
-    maxVal = INT_MIN;
-    sum = 0;
-    #pragma omp parallel for reduction(min:localMin) reduction(max:localMax) reduction(+:localSum)
-    for(int i = 0; i<arr.size(); ++i){
-        if(arr[i] < localMin) localMin = arr[i];
-        if(arr[i] > localMax) localMax = arr[i];
-        localSum+=arr[i];
-    }
-    minVal = localMin;
-    maxVal = localMax;
-    sum = localSum;
-    avg = static_cast<double>(sum) / arr.size();
+int serialMin(const vector<int>& arr) {
+    int min_val = arr[0];
+    for (int val : arr)
+        if (val < min_val)
+            min_val = val;
+    return min_val;
 }
 
-int main(){
-    const int SIZE = 10000000;
-    vector<int> arr(SIZE);
-    for(int i = 0; i<SIZE; ++i)
-        arr[i] = rand() % 100000;
-    
-    int min_s, max_s;
-    long long sum_s;
-    double avg_s;
+int serialMax(const vector<int>& arr) {
+    int max_val = arr[0];
+    for (int val : arr)
+        if (val > max_val)
+            max_val = val;
+    return max_val;
+}
 
-    int min_p, max_p;
-    long long sum_p;
-    double avg_p;
+// -------------------- Parallel Reduction Operations --------------------
+int parallelSum(const vector<int>& arr) {
+    int sum = 0;
+    #pragma omp parallel for reduction(+:sum)
+    for (int i = 0; i < arr.size(); ++i)
+        sum += arr[i];
+    return sum;
+}
 
-    // serial execution:
+int parallelMin(const vector<int>& arr) {
+    int min_val = arr[0];
+    #pragma omp parallel for reduction(min:min_val)
+    for (int i = 0; i < arr.size(); ++i)
+        if (arr[i] < min_val)
+            min_val = arr[i];
+    return min_val;
+}
 
-    double start = omp_get_wtime();
-    SerialOps(arr, min_s, max_s, sum_s, avg_s);
-    double time_serial = omp_get_wtime() - start;
+int parallelMax(const vector<int>& arr) {
+    int max_val = arr[0];
+    #pragma omp parallel for reduction(max:max_val)
+    for (int i = 0; i < arr.size(); ++i)
+        if (arr[i] > max_val)
+            max_val = arr[i];
+    return max_val;
+}
 
-    // ---------- Parallel Execution ----------
-    start = omp_get_wtime();
-    parallelOps(arr, min_p, max_p, sum_p, avg_p);
-    double time_parallel = omp_get_wtime() - start;
+// -------------------- Compare Performance --------------------
+void compareReduction(int size) {
+    vector<int> arr;
+    generateArray(arr, size);
 
-    // ---------- Output ----------
-    cout << "\n==== RESULTS ====\n";
-    cout << "Serial   -> Min: " << min_s << ", Max: " << max_s << ", Sum: " << sum_s << ", Avg: " << avg_s << "\n";
-    cout << "Parallel -> Min: " << min_p << ", Max: " << max_p << ", Sum: " << sum_p << ", Avg: " << avg_p << "\n";
+    int sum_serial, sum_parallel, min_serial, min_parallel, max_serial, max_parallel;
+    double avg_serial, avg_parallel;
 
-    cout << "\n==== PERFORMANCE ====\n";
-    cout << "Serial Time:   " << time_serial   << " sec\n";
-    cout << "Parallel Time: " << time_parallel << " sec\n";
+    // --- SUM ---
+    auto start = high_resolution_clock::now();
+    sum_serial = serialSum(arr);
+    auto stop = high_resolution_clock::now();
+    auto time_serial_sum = duration_cast<milliseconds>(stop - start).count();
 
+    start = high_resolution_clock::now();
+    sum_parallel = parallelSum(arr);
+    stop = high_resolution_clock::now();
+    auto time_parallel_sum = duration_cast<milliseconds>(stop - start).count();
+
+    // --- MIN ---
+    start = high_resolution_clock::now();
+    min_serial = serialMin(arr);
+    stop = high_resolution_clock::now();
+    auto time_serial_min = duration_cast<milliseconds>(stop - start).count();
+
+    start = high_resolution_clock::now();
+    min_parallel = parallelMin(arr);
+    stop = high_resolution_clock::now();
+    auto time_parallel_min = duration_cast<milliseconds>(stop - start).count();
+
+    // --- MAX ---
+    start = high_resolution_clock::now();
+    max_serial = serialMax(arr);
+    stop = high_resolution_clock::now();
+    auto time_serial_max = duration_cast<milliseconds>(stop - start).count();
+
+    start = high_resolution_clock::now();
+    max_parallel = parallelMax(arr);
+    stop = high_resolution_clock::now();
+    auto time_parallel_max = duration_cast<milliseconds>(stop - start).count();
+
+    // --- AVERAGE ---
+    avg_serial = (double)sum_serial / size;
+    avg_parallel = (double)sum_parallel / size;
+
+    // --- PRINT RESULTS ---
+    cout << "Array Size: " << size << "\n\n";
+    cout << left << setw(12) << "Operation"
+         << setw(15) << "Serial Time (ms)"
+         << setw(18) << "Parallel Time (ms)"
+         << setw(12) << "Speedup" << "\n";
+    cout << string(55, '-') << "\n";
+
+    auto show = [](const string& name, long t1, long t2) {
+        double speedup = (t2 == 0) ? 0 : (double)t1 / t2;
+        cout << left << setw(12) << name
+             << setw(15) << t1
+             << setw(18) << t2
+             << setw(12) << fixed << setprecision(2) << speedup << "\n";
+    };
+
+    show("Sum", time_serial_sum, time_parallel_sum);
+    show("Min", time_serial_min, time_parallel_min);
+    show("Max", time_serial_max, time_parallel_max);
+
+    cout << "\nAverage (Serial): " << avg_serial << "\n";
+    cout << "Average (Parallel): " << avg_parallel << "\n";
+}
+
+// -------------------- Main --------------------
+int main() {
+    int size = 10000000;  // Increase to see clearer performance gains
+    compareReduction(size);
     return 0;
-
-
 }
+
+// compile with: g++ -fopenmp Parallel_Reductions.cpp -o Parallel_Reductions_Obj
+// run with: ./Parallel_Reductions_Obj
