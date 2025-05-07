@@ -126,3 +126,6 @@ int main() {
     compareSorts(size);
     return 0;
 }
+
+// Compile with: g++ -fopenmp Bubble_Merge.cpp -o Bubble_Merge_Obj
+// Run with: ./Bubble_Merge_Obj
